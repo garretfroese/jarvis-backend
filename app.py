@@ -65,3 +65,22 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
+from flask import Flask, request, jsonify
+import os
+
+# Add this route
+@app.route("/relay", methods=["POST"])
+def relay():
+    secret = request.headers.get("X-JARVIS-KEY")
+    expected = os.environ.get("JARVIS_SECRET")
+
+    if not secret or secret != expected:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    data = request.json
+    command = data.get("command", "")
+    args = data.get("args", {})
+
+    result = route_command(command, args)
+    return jsonify({"status": "received", "result": result})
