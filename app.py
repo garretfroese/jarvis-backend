@@ -1,16 +1,38 @@
-# === JARVIS: AI Execution Framework (Autonomous Version) ===
+# === JARVIS: AI Execution Framework with Self-Modifying Capability ===
 
 from flask import Flask, request, jsonify
 import openai
 import os
 from flask_cors import CORS
+from datetime import datetime
+import json
 
 app = Flask(__name__)
 CORS(app)
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
+LOG_FILE = "chatlog.json"
 
-# === EXECUTION FUNCTIONS ===
+# === Execution Log Utility ===
+def log_interaction(payload):
+    try:
+        entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            **payload
+        }
+        if not os.path.exists(LOG_FILE):
+            with open(LOG_FILE, "w") as f:
+                json.dump([entry], f, indent=2)
+        else:
+            with open(LOG_FILE, "r+") as f:
+                data = json.load(f)
+                data.append(entry)
+                f.seek(0)
+                json.dump(data[-50:], f, indent=2)  # keep last 50
+    except Exception as e:
+        print("LOGGING ERROR:", str(e))
+
+# === Execution Commands ===
 def create_airtable_base(args):
     name = args.get("name", "Default Base")
     fields = args.get("fields", ["Name", "Email", "Status"])
@@ -26,7 +48,7 @@ def launch_blog(args):
     name = args.get("name", "New Blog")
     return {"status": f"Launched blog site: {name}"}
 
-# === INTENT-BASED DISPATCHER ===
+# === Intent Router ===
 def execute_intent(intent: str, args: dict):
     if intent == "create_airtable_base":
         return create_airtable_base(args)
@@ -37,7 +59,7 @@ def execute_intent(intent: str, args: dict):
     else:
         return {"status": f"Unknown intent: {intent}"}
 
-# === RELAY ENDPOINT (receives structured command from ChatGPT) ===
+# === Relay for GPT Instructions ===
 @app.route("/relay", methods=["POST"])
 def relay():
     secret = request.headers.get("X-JARVIS-KEY")
@@ -51,9 +73,61 @@ def relay():
     args = data.get("args", {})
 
     result = execute_intent(intent, args)
+
+    log_interaction({
+        "from": "ChatGPT",
+        "to": "Jarvis",
+        "intent": intent,
+        "args": args,
+        "result": result
+    })
+
     return jsonify({"status": "received", "result": result})
 
-# === CHAT ENDPOINT (fallback for user messages) ===
+# === Live Log Endpoint ===
+@app.route("/logs", methods=["GET"])
+def logs():
+    try:
+        with open(LOG_FILE, "r") as f:
+            data = json.load(f)
+        return jsonify(data[::-1])
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+# === Update Code Endpoint (Self-Modifying Jarvis) ===
+@app.route("/update-code", methods=["POST"])
+def update_code():
+    secret = request.headers.get("X-JARVIS-KEY")
+    expected = os.environ.get("JARVIS_SECRET")
+
+    if not secret or secret != expected:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    data = request.json
+    filename = data.get("file")
+    code = data.get("code")
+
+    try:
+        if not filename or not code:
+            return jsonify({"error": "Missing 'file' or 'code'"}), 400
+
+        with open(filename, "w") as f:
+            f.write(code)
+
+        log_interaction({
+            "from": "ChatGPT",
+            "to": "Jarvis",
+            "intent": "update-code",
+            "args": {"file": filename},
+            "result": {"status": f"File '{filename}' updated."}
+        })
+
+        return jsonify({"status": f"File '{filename}' written successfully."})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+# === GPT Chat Fallback ===
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json
@@ -62,7 +136,6 @@ def chat():
     if not user_message:
         return jsonify({"error": "Missing 'message' in request."}), 400
 
-    # fallback to GPT
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -73,8 +146,8 @@ def chat():
         )
         return jsonify({"response": response['choices'][0]['message']['content']})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)})
 
-# === START ===
+# === Startup ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
