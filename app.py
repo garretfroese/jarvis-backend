@@ -1,4 +1,4 @@
-# === JARVIS: AI Execution Framework with Self-Modifying Capability ===
+# === JARVIS: AI Execution Framework with Redeploy Capability ===
 
 from flask import Flask, request, jsonify
 import openai
@@ -6,6 +6,7 @@ import os
 from flask_cors import CORS
 from datetime import datetime
 import json
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -59,6 +60,32 @@ def execute_intent(intent: str, args: dict):
     else:
         return {"status": f"Unknown intent: {intent}"}
 
+# === Auto-Redeploy ===
+def redeploy():
+    try:
+        token = os.environ.get("RAILWAY_API_KEY")
+        project_id = os.environ.get("RAILWAY_PROJECT_ID")
+        service_id = os.environ.get("RAILWAY_SERVICE_ID")
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        query = {
+            "query": "mutation TriggerRedeploy($projectId: String!, $serviceId: String!) { serviceRedeploy(input: { projectId: $projectId, serviceId: $serviceId }) { id } }",
+            "variables": {
+                "projectId": project_id,
+                "serviceId": service_id
+            }
+        }
+
+        res = requests.post("https://backboard.railway.app/graphql", headers=headers, json=query)
+        return res.json()
+
+    except Exception as e:
+        return {"error": str(e)}
+
 # === Relay for GPT Instructions ===
 @app.route("/relay", methods=["POST"])
 def relay():
@@ -84,17 +111,19 @@ def relay():
 
     return jsonify({"status": "received", "result": result})
 
-# === Live Log Endpoint ===
+# === Logs Endpoint ===
 @app.route("/logs", methods=["GET"])
 def logs():
     try:
+        if not os.path.exists(LOG_FILE):
+            return jsonify([])
         with open(LOG_FILE, "r") as f:
             data = json.load(f)
         return jsonify(data[::-1])
     except Exception as e:
         return jsonify({"error": str(e)})
 
-# === Update Code Endpoint (Self-Modifying Jarvis) ===
+# === Update Code Endpoint ===
 @app.route("/update-code", methods=["POST"])
 def update_code():
     secret = request.headers.get("X-JARVIS-KEY")
@@ -122,7 +151,10 @@ def update_code():
             "result": {"status": f"File '{filename}' updated."}
         })
 
-        return jsonify({"status": f"File '{filename}' written successfully."})
+        # Auto trigger redeploy
+        redeploy_result = redeploy()
+
+        return jsonify({"status": f"File '{filename}' written and redeploy triggered.", "redeploy_result": redeploy_result})
 
     except Exception as e:
         return jsonify({"error": str(e)})
