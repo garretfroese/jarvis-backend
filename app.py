@@ -25,16 +25,18 @@ def launch_blog():
     return {"status": "Blog launched successfully."}
 
 # === Command Router ===
-def route_command(message: str):
-    lowered = message.lower()
-    if "create crm" in lowered:
-        return create_crm()
-    elif "send email" in lowered:
-        return send_email()
-    elif "launch blog" in lowered:
-        return launch_blog()
+def route_command(command: str, args: dict = {}):
+    command = command.lower()
+
+    if "create crm" in command:
+        return create_crm(args)
+    elif "send email" in command:
+        return send_email(args)
+    elif "launch blog" in command:
+        return launch_blog(args)
     else:
-        return None
+        return {"status": f"Unknown command: {command}"}
+
 
 # === GPT Chat Endpoint ===
 @app.route("/chat", methods=["POST"])
