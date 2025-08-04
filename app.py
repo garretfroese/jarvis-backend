@@ -1,77 +1,43 @@
-# === Jarvis Backend with Command Execution ===
+# === JARVIS: AI Execution Framework (Autonomous Version) ===
 
 from flask import Flask, request, jsonify
 import openai
 import os
 from flask_cors import CORS
-import requests
 
 app = Flask(__name__)
 CORS(app)
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# === Action Handlers ===
-def create_crm():
-    # Placeholder for CRM creation logic (e.g. create Airtable base via API)
-    return {"status": "CRM created successfully."}
+# === EXECUTION FUNCTIONS ===
+def create_airtable_base(args):
+    name = args.get("name", "Default Base")
+    fields = args.get("fields", ["Name", "Email", "Status"])
+    return {"status": f"Created Airtable base '{name}' with fields {fields}"}
 
-def send_email():
-    # Placeholder for email-sending logic (e.g. use Gmail API)
-    return {"status": "Email sent successfully."}
+def send_email(args):
+    to = args.get("to")
+    subject = args.get("subject")
+    body = args.get("body")
+    return {"status": f"Sent email to {to} with subject '{subject}'"}
 
-def launch_blog():
-    # Placeholder for deploying a simple blog (e.g. via GitHub Pages or Railway)
-    return {"status": "Blog launched successfully."}
+def launch_blog(args):
+    name = args.get("name", "New Blog")
+    return {"status": f"Launched blog site: {name}"}
 
-# === Command Router ===
-def route_command(command: str, args: dict = {}):
-    command = command.lower()
-
-    if "create crm" in command:
-        return create_crm(args)
-    elif "send email" in command:
+# === INTENT-BASED DISPATCHER ===
+def execute_intent(intent: str, args: dict):
+    if intent == "create_airtable_base":
+        return create_airtable_base(args)
+    elif intent == "send_email":
         return send_email(args)
-    elif "launch blog" in command:
+    elif intent == "launch_blog":
         return launch_blog(args)
     else:
-        return {"status": f"Unknown command: {command}"}
+        return {"status": f"Unknown intent: {intent}"}
 
-
-# === GPT Chat Endpoint ===
-@app.route("/chat", methods=["POST"])
-def chat():
-    data = request.json
-    user_message = data.get("message")
-
-    if not user_message:
-        return jsonify({"error": "Missing 'message' in request."}), 400
-
-    # Route known commands first
-    routed = route_command(user_message)
-    if routed:
-        return jsonify({"response": f"✅ Executed: {routed['status']}"})
-
-    # Fallback to GPT-4 chat
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are Jarvis, an AI assistant."},
-                {"role": "user", "content": user_message}
-            ]
-        )
-        return jsonify({"response": response['choices'][0]['message']['content']})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
-from flask import Flask, request, jsonify
-import os
-
-# Add this route
+# === RELAY ENDPOINT (receives structured command from ChatGPT) ===
 @app.route("/relay", methods=["POST"])
 def relay():
     secret = request.headers.get("X-JARVIS-KEY")
@@ -81,8 +47,34 @@ def relay():
         return jsonify({"error": "Unauthorized"}), 403
 
     data = request.json
-    command = data.get("command", "")
+    intent = data.get("intent")
     args = data.get("args", {})
 
-    result = route_command(command, args)
+    result = execute_intent(intent, args)
     return jsonify({"status": "received", "result": result})
+
+# === CHAT ENDPOINT (fallback for user messages) ===
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.json
+    user_message = data.get("message")
+
+    if not user_message:
+        return jsonify({"error": "Missing 'message' in request."}), 400
+
+    # fallback to GPT
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are Jarvis, an autonomous AI execution assistant."},
+                {"role": "user", "content": user_message}
+            ]
+        )
+        return jsonify({"response": response['choices'][0]['message']['content']})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# === START ===
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
